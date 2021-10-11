@@ -1,6 +1,7 @@
 # mocose
 We propose a momentum contrastive learning model to sentence embedding, namely MoCoSE.
-![这是图片](architecture.pdf "Architecture of MoCoSE")
+
+![architecture](architecture.pdf "Architecture of MoCoSE")
 
 Our MoCoSE code, mocose.py contains the main constituent code of the model; mocose_tools.py contains the code of the tools to evaluate the model; and mocose_demo.ipynbs is the example code we provide for training or for evaluation.
 

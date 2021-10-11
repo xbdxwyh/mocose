@@ -7,7 +7,7 @@ Our MoCoSE code, mocose.py contains the main constituent code of the model; moco
 
 It is worth noting that our code is built on transformers 4.4.2 and some code may no longer be adapted in the last few versions of updates. If you want to reproduce the code, please install transformers 4.4.2 version. Second, you will need to modify the location of the SentEval in the tools code to be used for evaluating the dataset.
 
-Our MoCoSE-bert-base-uncased weights can be downloaded from the link below.
+Our MoCoSE-bert-base-uncased weights can be downloaded from the [link](https://drive.google.com/file/d/1Xz5SWt8J6JSgdun5TvAajpGGOIejRUQ9/view?usp=sharing) below.
 
 | STS12      | STS13 | STS14 | STS15 | STS16 | STS-Benchmark | SICK-R | Avg. |
 | ----------- | ----------- |----------- |----------- |----------- |----------- |----------- |----------- |

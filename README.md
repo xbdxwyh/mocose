@@ -1,5 +1,5 @@
 # mocose
-We propose a momentum contrastive learning model to sentence embedding, namely MoCoSE.We focus on the effect of negative queue length in text comparison learning.
+We propose a momentum contrastive learning model to sentence embedding, namely MoCoSE.We focus on the effect of negative queue length in text comparison learning. work in progress.
 
 ![architecture](architecture.png "Architecture of MoCoSE")
 

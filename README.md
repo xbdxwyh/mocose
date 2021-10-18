@@ -1,7 +1,7 @@
 # mocose
 We propose a momentum contrastive learning model to sentence embedding, namely MoCoSE.We focus on the effect of negative queue length in text comparison learning. 
 
-NOTICE! You need to 1. download the [BERT weights](https://drive.google.com/file/d/1eG0zFgVH2PBBXUnYMgs_K9ODSV5ppoyd/view?usp=sharing) and change the path of the weights in demo. 2. download the sentEval and change the corresponding path in mocose_tools.
+NOTICE! You need to 1. download the [BERT weights](https://drive.google.com/file/d/1eG0zFgVH2PBBXUnYMgs_K9ODSV5ppoyd/view?usp=sharing) and change the path of the weights in demo. 2. download the [sentEval](https://drive.google.com/file/d/1VNWVejfoLoZvmZOrmqnHw6Cbmffd4sWd/view?usp=sharing) and change the corresponding path in mocose_tools.
 
 ![architecture](architecture.png "Architecture of MoCoSE")
 

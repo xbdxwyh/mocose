@@ -3,20 +3,27 @@ import sys
 import logging
 from prettytable import PrettyTable
 from typing import Dict, List, Optional
-
+import math
 from transformers.trainer import Trainer
 from datasets import Dataset
-
+from icecream import ic
+import numpy as np
+from einops import rearrange
+from torchmetrics import Metric
+from torch import nn
+from typing import Union, Any
 logger = logging.getLogger(__name__)
 
+
 # Set path to SentEval
-PATH_TO_SENTEVAL = 'E://Share//jupyterDir//SentEval'
-PATH_TO_DATA = 'E://Share//jupyterDir//SentEval//data'
+PATH_TO_SENTEVAL = 'F:\\Models\\temp\\SentEval'
+PATH_TO_DATA = 'F:\\Models\\temp\\SentEval\\data'
 
 # Import SentEval
 sys.path.insert(0, PATH_TO_SENTEVAL)
 import senteval
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # evaluate model in all STS tasks
 def print_table(task_names, scores):
     tb = PrettyTable()
@@ -30,8 +37,6 @@ def evalModel(model,tokenizer, pooler):
     params = {'task_path': PATH_TO_DATA, 'usepytorch': True, 'kfold': 5}
     params['classifier'] = {'nhid': 0, 'optim': 'rmsprop', 'batch_size': 128,
                                 'tenacity': 3, 'epoch_size': 2}
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
     def prepare(params, samples):
         return
 
@@ -39,9 +44,7 @@ def evalModel(model,tokenizer, pooler):
             # Handle rare token encoding issues in the dataset
             if len(batch) >= 1 and len(batch[0]) >= 1 and isinstance(batch[0][0], bytes):
                 batch = [[word.decode('utf-8') for word in s] for s in batch]
-
             sentences = [' '.join(s) for s in batch]
-            
             batch = tokenizer.batch_encode_plus(
                 sentences,
                 return_tensors='pt',
@@ -52,7 +55,6 @@ def evalModel(model,tokenizer, pooler):
             # Move to the correct device
             for k in batch:
                 batch[k] = batch[k].to(device)
-            
             # Get raw embeddings
             with torch.no_grad():
                 pooler_output = model(**batch, output_hidden_states=True, return_dict=True,sent_emb = True)
@@ -60,7 +62,6 @@ def evalModel(model,tokenizer, pooler):
                     pooler_output = pooler_output.last_hidden_state[:, 0]
                 elif pooler == "cls_after_pooler":
                     pooler_output = pooler_output.pooler_output
-
             return pooler_output.cpu()
     results = {}
 
@@ -92,8 +93,7 @@ def evalTransferModel(model,tokenizer, pooler):
     params = {'task_path': PATH_TO_DATA, 'usepytorch': True, 'kfold': 10}
     params['classifier'] = {'nhid': 0, 'optim': 'adam', 'batch_size': 64,
                                          'tenacity': 5, 'epoch_size': 4}
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+                                         
     def prepare(params, samples):
         return
 
@@ -139,8 +139,6 @@ def evalTransferModel(model,tokenizer, pooler):
     print_table(tasks, scores)
     return sum(scores)/len(scores)
 
-
-
 # override the evaluate method
 class MoCoSETrainer(Trainer):
     def __init__(self,**paraments):
@@ -148,6 +146,12 @@ class MoCoSETrainer(Trainer):
         
         self.best_sts = 0.0
         self.best_pool_sts = 0.0
+        self.eval_index = 0
+        self.queue_avg_pearson = 0.0
+        self.queue_pearson_list_per_eval_steps = []
+
+        self.queue_avg_list = []
+
     def evaluate(
         self,
         eval_dataset: Optional[Dataset] = None,
@@ -161,15 +165,23 @@ class MoCoSETrainer(Trainer):
                                             'tenacity': 3, 'epoch_size': 2}
 
         self.model.eval()
-        sum_acc = evalModel(self.model,tokenizer, pooler = 'cls_before_pooler')
+        sum_acc = evalModel(self.model,self.tokenizer, pooler = 'cls_before_pooler')
         #sum_acc_pool = evalModel(self.model,tokenizer, pooler = 'cls_after_pooler')
         # save and eval model
         if sum_acc > self.best_sts:
             self.best_sts = sum_acc
             self.save_model(self.args.output_dir+"\\best-model")
         
-        
         self.model.train()
-        print('acc before pooler:',sum_acc,'\n max acc ',self.best_sts)
+        print('acc before pooler:',sum_acc,'\nmax acc ',self.best_sts)
+        
         return {'acc before pooler':sum_acc}
 
+    def getckalist(self):
+        return self.queue_pearson_list_per_eval_steps
+    
+    def getspearonlist(self):
+        return self.queue_spearon_list_per_eval_steps
+    
+    def get_queue_avg_list(self):
+        return self.queue_avg_list

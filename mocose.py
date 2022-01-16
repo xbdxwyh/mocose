@@ -1,14 +1,13 @@
 import torch
 import torch.nn as nn
-
 import random
 import math
 import copy
 import logging
-
-
+from icecream import ic
 from transformers import (
     BertPreTrainedModel,
+    BertTokenizer,
 )
 
 from transformers.models.bert.modeling_bert import (
@@ -22,7 +21,8 @@ from transformers.file_utils import (
 from transformers.modeling_outputs import (
     SequenceClassifierOutput
 )
-
+import nlpaug.augmenter.word as naw
+import nlpaug.augmenter.sentence as nas
 logger = logging.getLogger(__name__)
 
 
@@ -114,82 +114,6 @@ class PoolerWithoutActive(nn.Module):
         return pooled_output
 
 
-# doc text needed for transformers model
-
-_CHECKPOINT_FOR_DOC = "bert-base-uncased"
-_CONFIG_FOR_DOC = "BertConfig"
-_TOKENIZER_FOR_DOC = "BertTokenizer"
-
-
-BERT_START_DOCSTRING = r"""
-
-    This model inherits from :class:`~transformers.PreTrainedModel`. Check the superclass documentation for the generic
-    methods the library implements for all its model (such as downloading or saving, resizing the input embeddings,
-    pruning heads etc.)
-
-    This model is also a PyTorch `torch.nn.Module <https://pytorch.org/docs/stable/nn.html#torch.nn.Module>`__
-    subclass. Use it as a regular PyTorch Module and refer to the PyTorch documentation for all matter related to
-    general usage and behavior.
-
-    Parameters:
-        config (:class:`~transformers.BertConfig`): Model configuration class with all the parameters of the model.
-            Initializing with a config file does not load the weights associated with the model, only the
-            configuration. Check out the :meth:`~transformers.PreTrainedModel.from_pretrained` method to load the model
-            weights.
-"""
-
-BERT_INPUTS_DOCSTRING = r"""
-    Args:
-        input_ids (:obj:`torch.LongTensor` of shape :obj:`({0})`):
-            Indices of input sequence tokens in the vocabulary.
-
-            Indices can be obtained using :class:`~transformers.BertTokenizer`. See
-            :meth:`transformers.PreTrainedTokenizer.encode` and :meth:`transformers.PreTrainedTokenizer.__call__` for
-            details.
-
-            `What are input IDs? <../glossary.html#input-ids>`__
-        attention_mask (:obj:`torch.FloatTensor` of shape :obj:`({0})`, `optional`):
-            Mask to avoid performing attention on padding token indices. Mask values selected in ``[0, 1]``:
-
-            - 1 for tokens that are **not masked**,
-            - 0 for tokens that are **masked**.
-
-            `What are attention masks? <../glossary.html#attention-mask>`__
-        token_type_ids (:obj:`torch.LongTensor` of shape :obj:`({0})`, `optional`):
-            Segment token indices to indicate first and second portions of the inputs. Indices are selected in ``[0,
-            1]``:
-
-            - 0 corresponds to a `sentence A` token,
-            - 1 corresponds to a `sentence B` token.
-
-            `What are token type IDs? <../glossary.html#token-type-ids>`_
-        position_ids (:obj:`torch.LongTensor` of shape :obj:`({0})`, `optional`):
-            Indices of positions of each input sequence tokens in the position embeddings. Selected in the range ``[0,
-            config.max_position_embeddings - 1]``.
-
-            `What are position IDs? <../glossary.html#position-ids>`_
-        head_mask (:obj:`torch.FloatTensor` of shape :obj:`(num_heads,)` or :obj:`(num_layers, num_heads)`, `optional`):
-            Mask to nullify selected heads of the self-attention modules. Mask values selected in ``[0, 1]``:
-
-            - 1 indicates the head is **not masked**,
-            - 0 indicates the head is **masked**.
-
-        inputs_embeds (:obj:`torch.FloatTensor` of shape :obj:`({0}, hidden_size)`, `optional`):
-            Optionally, instead of passing :obj:`input_ids` you can choose to directly pass an embedded representation.
-            This is useful if you want more control over how to convert :obj:`input_ids` indices into associated
-            vectors than the model's internal embedding lookup matrix.
-        output_attentions (:obj:`bool`, `optional`):
-            Whether or not to return the attentions tensors of all attention layers. See ``attentions`` under returned
-            tensors for more detail.
-        output_hidden_states (:obj:`bool`, `optional`):
-            Whether or not to return the hidden states of all layers. See ``hidden_states`` under returned tensors for
-            more detail.
-        return_dict (:obj:`bool`, `optional`):
-            Whether or not to return a :class:`~transformers.file_utils.ModelOutput` instead of a plain tuple.
-"""
-
-
-
 class InfoNCEWithQueue(nn.Module):
     def __init__(self,temp=0.05):
         super().__init__()
@@ -211,14 +135,14 @@ class InfoNCEWithQueue(nn.Module):
 
 
 features_grad=0.0
-# 为了读取模型中间参数变量的梯度而定义的辅助函数
+# Auxiliary functions defined to read the gradient of the intermediate parameter variables of the model
 def extract(g):
     global features_grad
     features_grad = g
 
 def fgsm_attack(embeddings,epsilon,gradient,mean=0.5,std=0.1):
     try:
-        # 第一个训练的时候没有梯度
+        # No gradient in the first run
         neg_grad = gradient.sign()
     except:
         return embeddings
@@ -253,7 +177,21 @@ def feature_cut_off(inputs_embeds,prob=0.01):
             inputs_embeds[i][:,cut_index].fill_(0)
     return inputs_embeds
 
+def get_sent_ids(origin_ids,mask):
+    origin_sent = [i.item() for i,j in zip(origin_ids,mask) if j.item() != 0]
+    if origin_sent[-1] == 102:
+        origin_sent = origin_sent[:-1]
+    return origin_sent[1:]
 
+def get_origin_text(untokenizer,origin_sent):
+    origin_sent_untokenizer = [untokenizer[i] for i in origin_sent]
+    origin_sts = ' '.join(origin_sent_untokenizer)
+    return origin_sts
+
+def aug_and_tokenizer(tokenizer, origin_sts,aug_model):
+    aug_text = aug_model.augment(origin_sts)
+    aug_tokenizer = tokenizer(aug_text, padding='max_length',max_length = 32,truncation = True)
+    return aug_tokenizer
 
 class MoCoSEEmbeddings(nn.Module):
     """Construct the embeddings from word, position and token_type embeddings."""
@@ -294,11 +232,10 @@ class MoCoSEEmbeddings(nn.Module):
 
         if token_type_ids is None:
             token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
-
+        
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
             
-        
         if not sent_emb and self.config.fgsm > 0:
             try:
                 inputs_embeds.register_hook(extract)
@@ -307,7 +244,6 @@ class MoCoSEEmbeddings(nn.Module):
             else:
                 inputs_embeds = fgsm_attack(inputs_embeds,self.config.fgsm,features_grad)
         
-        
         if not sent_emb:
             # token cut off
             if self.config.token_drop_prob > 0:
@@ -315,7 +251,7 @@ class MoCoSEEmbeddings(nn.Module):
             # feature cut off
             if self.config.feature_drop_prob > 0:
                 inputs_embeds = feature_cut_off(inputs_embeds,prob = self.config.feature_drop_prob)
-        
+
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
         embeddings = inputs_embeds + token_type_embeddings
@@ -337,60 +273,71 @@ class MoCoSEEmbeddings(nn.Module):
         return embeddings
 
 
-
-
-
-# implement of SimCSEModel
-
-@add_start_docstrings(
-    """
-    Bert Model transformer with a sequence classification/regression head on top (a linear layer on top of the pooled
-    output) e.g. for GLUE tasks.
-    """,
-    BERT_START_DOCSTRING,
-)
-
 class MoCoSEModel(BertPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.decay = config.ema_decay
         self.K = config.K
         self.K_start = config.K_start
-        
+        self.contextual_wordembs_aug = config.contextual_wordembs_aug
         self.online_embeddings = MoCoSEEmbeddings(config)
         self.online_encoder = BertEncoder(config)
         self.online_pooler = PoolerWithoutActive(config)
         self.online_projection = ProjectionLayer(config)
         
         self.prodiction = MLP(config)
-        
         self.loss_fct = InfoNCEWithQueue()
-        
         self.init_weights()
-        
+
+        # add text aug
+        ################## different augumentation experiment ######################
+        if self.contextual_wordembs_aug:
+            with open(r'F:\Experiment\MoCoSE\codes\pretrained_bert\bert-base-uncased\vocab.txt','r',encoding='utf8') as f:
+                test_untokenizer = f.readlines()
+            self.untokenizer = [i[:-1] for i in test_untokenizer]
+            self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+            if config.text_aug_type == 'cwea':
+                self.aug = naw.ContextualWordEmbsAug(model_path='roberta-base', action="insert", device='cuda')
+            elif config.text_aug_type == 'spa':
+                self.aug = naw.SpellingAug()
+            elif config.text_aug_type == 'cwesa':
+                self.aug = nas.ContextualWordEmbsForSentenceAug(model_path='xlnet-base-cased', device='cuda')
+            elif config.text_aug_type == 'bta':
+                self.aug = naw.BackTranslationAug(from_model_name='facebook/wmt19-en-de', to_model_name='facebook/wmt19-de-en', device='cuda')
+        ###########################################################################
+
         # create the queue 
-        self.register_buffer("queue", torch.randn(config.out_size, config.K_start))
+        self.register_buffer("queue", torch.randn(config.out_size, config.K))
+        # self.register_buffer("queue", torch.randn(config.out_size, config.K_start))
         self.queue_size = config.K_start
         self.queue = nn.functional.normalize(self.queue, dim=0)
 
-        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
+        ################## for negative sample similarity experiment ######################
+        # self.cka_fun = CKA()
+        # self.queue_avg_cka = 0.0 
+        # self.avg_pearson = 0.0
+        # self.queue_avg_relation = 0.0
+        # self.enqueue_threshold = 0
+        # self.skip_counts = 0
+        ###################################################################################
+
+        # age test?
+        self.age_test = config.age_test
+        self.neg_queue_slice_span = config.neg_queue_slice_span
         
+
+        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
         self.prepare()
         
-    # 需要改 init之类的问题
     def prepare(self):
         #self.target_embeddings = EMA(self.online_embeddings, decay = self.decay)
         self.target_encoder = EMA(self.online_encoder,decay = self.decay)
         self.target_pooler = EMA(self.online_pooler,decay = self.decay)
         self.target_projection = EMA(self.online_projection,decay = self.decay)
 
-    @add_start_docstrings_to_model_forward(BERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
-    @add_code_sample_docstrings(
-        tokenizer_class=_TOKENIZER_FOR_DOC,
-        checkpoint=_CHECKPOINT_FOR_DOC,
-        output_type=SequenceClassifierOutput,
-        config_class=_CONFIG_FOR_DOC,
-    )
+    def get_queue_avg_cka(self):
+        return self.queue_avg_cka
+
     def get_input_embeddings(self):
         return self.embeddings.word_embeddings
 
@@ -446,6 +393,14 @@ class MoCoSEModel(BertPreTrainedModel):
             input_ids = input_ids[:,0]
             attention_mask = attention_mask[:,0]
             token_type_ids = token_type_ids[:,0]
+            if self.contextual_wordembs_aug:
+                temp_ids = [get_sent_ids(ids,mask) for (ids,mask) in zip(input_ids,attention_mask)]
+                temp_text = [get_origin_text(self.untokenizer,ids) for ids in temp_ids]
+                #temp_sent = [tokenizer_func(aug_text_func(untokenizer,sent,aug)) for sent in temp_ids]
+                temp_data = aug_and_tokenizer(self.tokenizer, temp_text, self.aug)
+                aug_input_ids = torch.LongTensor(temp_data['input_ids']).cuda()
+                aug_attention_mask = torch.LongTensor(temp_data['attention_mask']).cuda()
+                aug_token_type_ids = torch.LongTensor(temp_data['token_type_ids']).cuda()
         
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -482,6 +437,10 @@ class MoCoSEModel(BertPreTrainedModel):
         # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
         # ourselves in which case we just need to make it broadcastable to all heads.
         extended_attention_mask: torch.Tensor = self.get_extended_attention_mask(attention_mask, input_shape, device)
+
+        # for text aug
+        if self.contextual_wordembs_aug and not sent_emb:
+            aug_extended_attention_mask: torch.Tensor = self.get_extended_attention_mask(aug_attention_mask, input_shape, device)
 
         # If a 2D or 3D attention mask is provided for the cross-attention
         # we need to make broadcastable to [batch_size, num_heads, seq_length, seq_length]
@@ -535,14 +494,25 @@ class MoCoSEModel(BertPreTrainedModel):
         self.target_pooler.update(self.online_pooler)
         self.target_projection.update(self.online_projection)
         
-        v_target = self.online_embeddings(
-            input_ids=input_ids,
-            position_ids=position_ids,
-            token_type_ids=token_type_ids,
-            inputs_embeds=inputs_embeds,
-            past_key_values_length=past_key_values_length,
-            #sent_emb=sent_emb
-        )
+        if self.contextual_wordembs_aug:
+            # using contextual word embedding augumentations
+            v_target = self.online_embeddings(
+                input_ids=aug_input_ids,
+                position_ids=position_ids,
+                token_type_ids=aug_token_type_ids,
+                inputs_embeds=inputs_embeds,
+                past_key_values_length=past_key_values_length,
+                #sent_emb=sent_emb
+            )
+        else:
+            v_target = self.online_embeddings(
+                input_ids=input_ids,
+                position_ids=position_ids,
+                token_type_ids=token_type_ids,
+                inputs_embeds=inputs_embeds,
+                past_key_values_length=past_key_values_length,
+                #sent_emb=sent_emb
+            )        
         
         # Encoder
         attention_online = self.online_encoder(
@@ -557,42 +527,93 @@ class MoCoSEModel(BertPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        attention_target = self.target_encoder.model(
-            v_target,
-            attention_mask=extended_attention_mask,
-            head_mask=head_mask,
-            encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=encoder_extended_attention_mask,
-            past_key_values=past_key_values,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-        
+
+        if self.contextual_wordembs_aug:
+            # using contextual word embedding augumentations
+            attention_target = self.target_encoder.model(
+                v_target,
+                attention_mask=aug_extended_attention_mask,
+                head_mask=head_mask,
+                encoder_hidden_states=encoder_hidden_states,
+                encoder_attention_mask=encoder_extended_attention_mask,
+                past_key_values=past_key_values,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+            )
+        else:
+            attention_target = self.target_encoder.model(
+                v_target,
+                attention_mask=extended_attention_mask,
+                head_mask=head_mask,
+                encoder_hidden_states=encoder_hidden_states,
+                encoder_attention_mask=encoder_extended_attention_mask,
+                past_key_values=past_key_values,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+            )
+
         # pooler
         attention_online_out = attention_online[0]
         attention_target_out = attention_target[0]
-        
         # 进行pooler
         proj_online = self.online_pooler(attention_online_out)
         proj_target = self.target_pooler.model(attention_target_out)
-        
         # 进行 project
         proj_online = self.online_projection(proj_online)
         proj_target = self.target_projection.model(proj_target)
-        
         # prediction
         online_out = self.prodiction(proj_online)
         target_out = proj_target
-        
-        # 设置pooler 输出
+        # set pooler output
         attention_online.pooler_output = online_out
         attention_target.pooler_output = target_out
-        
-        loss = self.loss_fct(online_out,target_out,self.queue.clone().detach())
+
+        # Experiment of using negative samples with different 'age'
+        if self.age_test:
+            # if self.queue_size < 1024:
+            #     loss = self.loss_fct(online_out,target_out,self.queue.clone().detach())
+            if self.queue_size+self.K_start < self.K:
+                loss = self.loss_fct(online_out,target_out,self.queue[:,0:self.queue_size+self.K_start].clone().detach())
+            else:
+                # queue_without_middle = torch.cat((self.queue[:,0:self.neg_queue_slice_span],self.queue[:,(self.K - self.neg_queue_slice_span):self.K]), dim=1).clone().detach()
+                queue_with_middle = self.queue[:,0:2*self.neg_queue_slice_span].clone().detach()
+                # a = torch.cat((self.queue[:,0:1*self.K_start],self.queue[:,2*self.K_start:3*self.K_start]), dim=1)
+                # b = torch.cat((a, self.queue[:,4*self.K_start:5*self.K_start]), dim=1)
+                # queue_with_jump = torch.cat((b, self.queue[:,6*self.K_start:7*self.K_start]), dim=1).clone().detach()
+                loss = self.loss_fct(online_out,target_out,queue_with_middle)
+        else:
+            if self.queue_size+self.K_start < self.K:
+                loss = self.loss_fct(online_out,target_out,self.queue[:,0:self.queue_size+self.K_start].clone().detach())
+            else:
+                loss = self.loss_fct(online_out,target_out,self.queue.clone().detach())
+
+        ### add cka test
+        # first is target_out needed to pushed into queue
+        # second is the average cka already in the queue
+        # self.queue_avg_cka = self.cka_fun.kernel_CKA(target_out.T.detach().cpu(), self.queue.detach().cpu())
+        ### add cka test
+        #------add avg_cos_similarity------
+        # batch_similarity = 0.0
+        # count = 0
+        # for item in self.queue.T.detach():
+        #     for node in target_out.detach():
+        #         batch_similarity += pearsonr(node.cpu(),item.cpu())[0]
+        #         count += 1
+        # self.avg_pearson += (batch_similarity/count)
+        # ic(count, self.avg_pearson, batch_similarity)
+        #------add avg_cos_similarity------
+        # self.queue_avg_relation = torch.mean(torch.mm(nn.functional.normalize(target_out), nn.functional.normalize(self.queue)))
+        # if self.queue_avg_relation >= self.enqueue_threshold: # and (len(self.queue) != self.K):
+
         self.dequeue_and_enqueue(target_out)
-        
+        #     self.enqueue_threshold = self.queue_avg_relation
+        # else:
+        #     self.skip_counts += 1
+
         return SequenceClassifierOutput(
             loss=loss,
             hidden_states=[online_out, target_out],

@@ -41,7 +41,6 @@ class EMA(torch.nn.Module):
     def update(self, model):
         self.step = self.step+1
         decay_new = 1-(1-self.decay)*(math.cos(math.pi*self.step/self.total_step)+1)/2
-        # 慢慢把self.model往model移动
         with torch.no_grad():
             e_std = self.model.state_dict().values()
             m_std = model.state_dict().values()
@@ -559,10 +558,10 @@ class MoCoSEModel(BertPreTrainedModel):
         # pooler
         attention_online_out = attention_online[0]
         attention_target_out = attention_target[0]
-        # 进行pooler
+        # pooler
         proj_online = self.online_pooler(attention_online_out)
         proj_target = self.target_pooler.model(attention_target_out)
-        # 进行 project
+        # project
         proj_online = self.online_projection(proj_online)
         proj_target = self.target_projection.model(proj_target)
         # prediction

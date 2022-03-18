@@ -1,0 +1,26 @@
+{
+  "_data": null,
+  "_data_files": [
+    {
+      "filename": "dataset.arrow"
+    }
+  ],
+  "_fingerprint": "12c590bc271a14cd",
+  "_format_columns": [
+    "input_ids",
+    "token_type_ids",
+    "attention_mask"
+  ],
+  "_format_kwargs": {},
+  "_format_type": "torch",
+  "_indexes": {},
+  "_indices": null,
+  "_indices_data_files": [],
+  "_inplace_history": [
+    {
+      "transforms": []
+    }
+  ],
+  "_output_all_columns": false,
+  "_split": "train"
+}

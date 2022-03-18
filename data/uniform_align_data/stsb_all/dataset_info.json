@@ -1,0 +1,64 @@
+{
+  "builder_name": null,
+  "citation": "",
+  "config_name": null,
+  "dataset_size": null,
+  "description": "",
+  "download_checksums": null,
+  "download_size": null,
+  "features": {
+    "attention_mask": {
+      "_type": "Sequence",
+      "feature": {
+        "_type": "Sequence",
+        "feature": {
+          "_type": "Value",
+          "dtype": "int8",
+          "id": null
+        },
+        "id": null,
+        "length": -1
+      },
+      "id": null,
+      "length": -1
+    },
+    "input_ids": {
+      "_type": "Sequence",
+      "feature": {
+        "_type": "Sequence",
+        "feature": {
+          "_type": "Value",
+          "dtype": "int32",
+          "id": null
+        },
+        "id": null,
+        "length": -1
+      },
+      "id": null,
+      "length": -1
+    },
+    "token_type_ids": {
+      "_type": "Sequence",
+      "feature": {
+        "_type": "Sequence",
+        "feature": {
+          "_type": "Value",
+          "dtype": "int8",
+          "id": null
+        },
+        "id": null,
+        "length": -1
+      },
+      "id": null,
+      "length": -1
+    }
+  },
+  "homepage": "",
+  "license": "",
+  "post_processed": null,
+  "post_processing_size": null,
+  "size_in_bytes": null,
+  "splits": null,
+  "supervised_keys": null,
+  "version": null
+}

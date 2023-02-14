@@ -1,5 +1,5 @@
 # MoCoSE
-Implementation of paper: [Exploring the Impact of Negative Samples of Contrastive Learning: A Case Study of Sentence Embedding]()
+Implementation of paper: [Exploring the Impact of Negative Samples of Contrastive Learning: A Case Study of Sentence Embedding](https://aclanthology.org/2022.findings-acl.248/)
 , been accepted to appear in the Findings of ACL 2022.
 
 We propose a momentum contrastive learning model to sentence embedding, namely MoCoSE. We focus on the effect of negative queue length in text comparison learning.
